@@ -91,6 +91,29 @@ class C2B(nn.Module):
             assert code.shape == (sub_frames, block_size, block_size)
             print('Initialized sensor with flutter shutter code from %s'%filename)
         
+        elif mask == '2x2':
+            assert block_size == 2
+            mask = scipy.io.loadmat('./data/2x2_mask.mat')['mask']
+            mask = np.transpose(mask, [2, 0, 1])
+            mask = mask.astype(np.float32)
+            # Crop block size
+            mask = mask[:, :block_size, :block_size]
+            assert mask.shape == (sub_frames, block_size, block_size)
+
+            code = torch.cuda.FloatTensor(mask).unsqueeze(0)
+            # code = torch.tensor(mask).unsqueeze(0)
+
+        elif mask == '4x4':
+            assert block_size == 4
+            mask = scipy.io.loadmat('./data/4x4_mask.mat')['mask']
+            mask = np.transpose(mask, [2, 0, 1])
+            mask = mask.astype(np.float32)
+            # Crop block size
+            mask = mask[:, :block_size, :block_size]
+            assert mask.shape == (sub_frames, block_size, block_size)
+
+            code = torch.cuda.FloatTensor(mask).unsqueeze(0)
+
         else:
             ## random code 16x8x8
             code = torch.empty(1, sub_frames, block_size, block_size).cuda()
@@ -101,11 +124,14 @@ class C2B(nn.Module):
         self.code = nn.Parameter(code, requires_grad=False)
         self.two_bucket = two_bucket
         # self.code_repeat = code.repeat(1, 1, patch_size//block_size, patch_size//block_size)
+        self.code_repeat = None
 
 
     def forward(self, x):
         _,_,H,W = x.size()
         code_repeat = self.code.repeat(1, 1, H//self.block_size, W//self.block_size)
+        if self.code_repeat is None:
+            self.code_repeat = code_repeat
         b1 = torch.sum(code_repeat*x, dim=1, keepdim=True) / torch.sum(code_repeat, dim=1, keepdim=True)
         if not self.two_bucket:
             return b1

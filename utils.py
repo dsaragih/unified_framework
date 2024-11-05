@@ -14,6 +14,44 @@ from matplotlib import cm
 import matplotlib.pyplot as plt
 from math import exp
 import matplotlib.pyplot as plt
+import augmentation
+
+def _find_augmentation(cfg):
+    args = cfg.copy()
+    obj_type = args.pop('type')
+    # Resize, random rot, random crop, flip, random resize
+    if obj_type == "Resize":
+        return augmentation.Resize(**args)
+    elif obj_type == "RandomCrop":
+        return augmentation.RandomCrop(**args)
+    elif obj_type == "Flip":
+        return augmentation.Flip(**args)
+    elif obj_type == "RandomResize":
+        return augmentation.RandomResize(**args)
+    elif obj_type == "RandomRotate":
+        return augmentation.RandomRotate(**args)
+    else:
+        raise ValueError("Invalid augmentation type: {}".format(obj_type))
+
+class Compose:
+    def __init__(self, transforms):
+        assert isinstance(transforms, list)
+        self.transforms = []
+        for transform in transforms:
+            if isinstance(transform, dict):
+                transform = _find_augmentation(transform)
+                self.transforms.append(transform)
+            elif callable(transform):
+                self.transforms.append(transform)
+            else:
+                raise TypeError('transform must be a dict')
+
+    def __call__(self, data):
+        for t in self.transforms:
+            data = t(data)
+            if data is None:
+                return None
+        return data
 
 def gradx(tensor):
     return tensor[:,:,:,2:] - tensor[:,:,:,:-2]
