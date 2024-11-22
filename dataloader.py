@@ -60,7 +60,9 @@ class DavisData(data.Dataset):
         self.pipeline = Compose(kwargs["pipeline"])
 
         self.ratio,self.resize_w,self.resize_h = self.mask.shape
+
         for image_dir in os.listdir(data_root):
+
             train_data_path = osp.join(data_root,image_dir)
             data_path = os.listdir(train_data_path)
             data_path.sort()
@@ -152,5 +154,59 @@ class SixGraySimData(data.Dataset):
                 meas_t = np.expand_dims(meas_t, 0)
                 meas = np.concatenate((meas, meas_t), axis=0)
         return meas / np.sum(self.mask, axis=0, keepdims=True), pic_gt
+    def __len__(self,):
+        return len(self.data_name_list)
+    
+class GraySimDavis(data.Dataset):
+    def __init__(self,data_root,*args,**kwargs):
+        self.data_root = data_root
+        self.data_name_list = os.listdir(data_root)
+        self.mask = kwargs["mask"]
+        # self.mask = mask
+        self.frames,self.height,self.width = self.mask.shape
+
+    def __getitem__(self,index):
+        pic = scio.loadmat(osp.join(self.data_root,self.data_name_list[index]))
+        if "orig" in pic:
+            pic = pic['orig']
+        elif "patch_save" in pic:
+            pic = pic['patch_save']
+        elif "p1" in pic:
+            pic = pic['p1']
+        elif "p2" in pic:
+            pic = pic['p2']
+        elif "p3" in pic:
+            pic = pic['p3']
+
+        # 256 x 256 x 32
+        pic = pic[0:self.height,0:self.width,:]
+        # -> 32 x 256 x 256
+        pic = np.transpose(pic, [2, 0, 1])
+        # e.g. 2 x 16 x 256 x 256
+        if pic.shape[0] // self.frames == 0:
+            return np.zeros([self.frames, self.height, self.width]), np.zeros([self.frames, self.height, self.width])
+        pic_gt = np.zeros([pic.shape[0] // self.frames, self.frames, self.height, self.width])
+        # print(f"Pic shape: {pic.shape}")
+        # print(f"Pic_gt shape: {pic_gt.shape}")
+        for jj in range(pic_gt.shape[0]*self.frames):
+            if jj % self.frames == 0:
+                meas_t = np.zeros([1, self.height, self.width])
+                n = 0
+            pic_t = pic[jj, :, :]
+            mask_t = self.mask[n, :, :]
+
+            pic_gt[jj // self.frames, n, :, :] = pic_t
+            n += 1
+            meas_t = meas_t + np.multiply(mask_t, pic_t)
+
+            if jj == (self.frames-1):
+                # First time.
+                meas_t = np.expand_dims(meas_t, 0)
+                meas = meas_t
+            elif (jj + 1) % self.frames == 0 and jj != (self.frames-1):
+                meas_t = np.expand_dims(meas_t, 0)
+                meas = np.concatenate((meas, meas_t), axis=0)
+        return meas / np.sum(self.mask, axis=0, keepdims=True), pic_gt
+    
     def __len__(self,):
         return len(self.data_name_list)

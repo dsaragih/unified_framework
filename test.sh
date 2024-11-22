@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # srun --partition=gpunodes --mem=8G --gres=gpu:rtx_a6000 \
 #     python infer_h5.py \
 #     --ckpt c2b_optimal.pth \
@@ -5,9 +7,10 @@
 #     --save_gif \
 #     --two_bucket
 
-srun --partition=debugnodes --mem=8G --gres=gpu:nvidia_titan_v \
+
+srun --partition=debugnodes --mem=8G --nodelist=tensor1 --gres=gpu:nvidia_titan_v \
     python test.py \
-    --ckpt "model_000004.pth" \
+    --ckpt "model_2x2_000198.pth" \
     --gpu 0 \
     --two_bucket \
     --blocksize 2 \

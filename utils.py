@@ -161,7 +161,24 @@ def compute_ssim(vid1, vid2):
     # print(ret.shape)
     return ret
 
+def compare_lpips(img1, img2, loss_fn):
+    # img1, img2: [0, 255]
+    img1 = (img1 / 255.0) * 2 - 1
+    img2 = (img2 / 255.0) * 2 - 1
 
+    # Convert from numpy arrays to PyTorch tensors
+    img1 = torch.from_numpy(img1).cuda()
+    img2 = torch.from_numpy(img2).cuda()
+    if len(img1.shape) == 2:
+        img1 = img1.unsqueeze(0).unsqueeze(0)
+        img2 = img2.unsqueeze(0).unsqueeze(0)
+    elif len(img1.shape) == 3:
+        img1 = img1.permute(2, 0, 1).unsqueeze(0) # shape: (1, 3, H, W)
+        img2 = img2.permute(2, 0, 1).unsqueeze(0)
+    
+    lpips_score = loss_fn(img1, img2).squeeze().item()
+
+    return lpips_score
 
 def create_dirs(save_path):
     """create 

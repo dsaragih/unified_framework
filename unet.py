@@ -109,7 +109,7 @@ class UNet(nn.Module):
 
         # Bottleneck
         bottleneck1 = self.bottleneck(encode_pool3)
-
+        
         # Decode
         decode_block3 = self.crop_and_concat(bottleneck1, encode_block3, crop=True)
         cat_layer2 = self.conv_decode3(decode_block3)

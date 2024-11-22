@@ -17,12 +17,14 @@ from unet import UNet
 import utils
 from inverse import ShiftVarConv2D, StandardConv2D
 import scipy.io as scio
-from dataloader import SixGraySimData
+from dataloader import SixGraySimData, GraySimDavis
+from lpips import LPIPS
 
 ## parse arguments
+# Dirs: /scratch/ondemand28/dsaragih/datasets/TestDAVIS/TestImages, /u8/d/dsaragih/diffusion-posterior-sampling/STFormer/test_datasets/simulation
 parser = argparse.ArgumentParser()
 parser.add_argument('--savedir', type=str, default='results' ,help='export dir name to dump results')
-parser.add_argument('--data_path', type=str, default='/u8/d/dsaragih/diffusion-posterior-sampling/STFormer/test_datasets/simulation', help='path to test data')
+parser.add_argument('--data_path', type=str, default='/scratch/ondemand28/dsaragih/datasets/TestDAVIS/TestImages', help='path to test data')
 parser.add_argument('--ckpt', type=str, required=True, help='checkpoint full name')
 parser.add_argument('--blocksize', type=int, default=2, help='tile size for code default 3x3')
 parser.add_argument('--subframes', type=int, default=4, help='num sub frames')
@@ -96,19 +98,27 @@ print(f"Code repeat shape: {code_repeat.shape}")
 # for i in range(code_repeat.shape[1]):
 #     utils.save_image(code_repeat[0, i].cpu().numpy(), os.path.join(save_path, f'code_{i}.png'))
 
-test_data = SixGraySimData(args.data_path,mask=code_repeat.squeeze(0).cpu().numpy())
+test_data = GraySimDavis(args.data_path,mask=code_repeat.squeeze(0).cpu().numpy())
 data_loader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
 
 logging.info('Starting inference')
 
 full_gt = []
 full_pred = []
+psnr_list, ssim_list, lpips_list = [], [], []
+psnr_dict, ssim_dict, lpips_dict = {}, {}, {}
+save_images = True
 with torch.no_grad():
+    lpips_fn = LPIPS(net='vgg').cuda()
     for data_iter,data in enumerate(data_loader):
         meas, gt = data
         # if gt all zeros, skip
         if torch.sum(gt) == 0:
             continue
+
+        if data_iter > 3:
+            save_images = False
+
         gt = gt[0].numpy() # (f/s, s, H,W)
         meas = meas[0].float().cuda() # (f/s, 1 ,H,W)
         batch_size = meas.shape[0] # frames / subframes
@@ -120,6 +130,7 @@ with torch.no_grad():
             
         psnr_sum = 0.
         ssim_sum = 0.
+        lpips_sum = 0.
         for seq in range(batch_size):
             vid = torch.cuda.FloatTensor(gt[seq:seq+1,...]) # (1, s, H,W)
             # Number of frames might be less than code_repeat
@@ -143,7 +154,7 @@ with torch.no_grad():
             highres_np = highres_vid.squeeze().data.cpu().numpy() # (16,H,W)
             full_pred.append(highres_np)
             full_gt.append(vid_np)
-            if seq == 0:
+            if seq == 0 and data_iter == 0:
                 logging.info('Shapes: b1_np: %s, vid_np: %s, highres_np: %s'%(b1_np.shape, vid_np.shape, highres_np.shape))
 
             ## psnr
@@ -152,36 +163,75 @@ with torch.no_grad():
 
             ## ssim
             ssim = 0.
+            lpips = 0.
             for sf in range(vid_np.shape[0]):
                 ssim += compare_ssim(highres_np[sf], vid_np[sf], 
                                 gaussian_weights=True, sigma=1.5, use_sample_covariance=False, data_range=1.0)
+                lpips += utils.compare_lpips(highres_np[sf]*255, vid_np[sf]*255, lpips_fn)
             ssim = ssim / vid_np.shape[0]
+            lpips = lpips / vid_np.shape[0]
             ssim_sum += ssim
+            lpips_sum += lpips
+
             if seq%args.log_interval == 0:
-                logging.info('Seq %.2d PSNR: %.2f SSIM: %.3f'%(seq+1, psnr, ssim))
+                logging.info('Seq %.2d PSNR: %.2f SSIM: %.3f LPIPS: %.3f'%(seq+1, psnr, ssim, lpips))
 
             ## saving images and gifs
-            os.makedirs(os.path.join(save_path, _name), exist_ok=True)
-            os.makedirs(os.path.join(save_path, _name, 'frames'), exist_ok=True)
-            utils.save_image(b1_np, os.path.join(save_path, _name, 'seq_%.2d_coded.png'%(seq+1)))
-            if args.two_bucket:
-                utils.save_image(b0_np, os.path.join(save_path, _name, 'seq_%.2d_complement.png'%(seq+1)))
-            if args.save_gif:
-                utils.save_gif(vid_np, os.path.join(save_path, _name, 'seq_%.2d_gt.gif'%(seq+1)))
-                utils.save_gif(highres_np, os.path.join(save_path, _name, 'seq_%.2d_recon.gif'%(seq+1)))
-            for sub_frame in range(vid_np.shape[0]):
-                utils.save_image(highres_np[sub_frame], os.path.join(save_path, _name, 'frames', 'seq_%.2d_recon_%.2d.png'%(seq+1, sub_frame+1)))
+            if save_images:
+                os.makedirs(os.path.join(save_path, _name), exist_ok=True)
+                os.makedirs(os.path.join(save_path, _name, 'frames'), exist_ok=True)
+                utils.save_image(b1_np, os.path.join(save_path, _name, 'seq_%.2d_coded.png'%(seq+1)))
+                if args.two_bucket:
+                    utils.save_image(b0_np, os.path.join(save_path, _name, 'seq_%.2d_complement.png'%(seq+1)))
+                if args.save_gif:
+                    utils.save_gif(vid_np, os.path.join(save_path, _name, 'seq_%.2d_gt.gif'%(seq+1)))
+                    utils.save_gif(highres_np, os.path.join(save_path, _name, 'seq_%.2d_recon.gif'%(seq+1)))
+                for sub_frame in range(vid_np.shape[0]):
+                    utils.save_image(highres_np[sub_frame], os.path.join(save_path, _name, 'frames', 'seq_%.2d_recon_%.2d.png'%(seq+1, sub_frame+1)))
 
+        avg_psnr = psnr_sum / batch_size
+        avg_ssim = ssim_sum / batch_size
+        avg_lpips = lpips_sum / batch_size
         logging.info('Sequence %s done'%(_name))
-        logging.info('Average PSNR: %.2f'%(psnr_sum/(batch_size)))
-        logging.info('Average SSIM: %.3f'%(ssim_sum/(batch_size)))
+        logging.info('Average PSNR: %.2f'%(avg_psnr))
+        logging.info('Average SSIM: %.3f'%(avg_ssim))
+        logging.info('Average LPIPS: %.3f'%(avg_lpips))
         logging.info('Saved images and gifs for all sequences')
 
-    with h5py.File('predict.h5','w') as write:
-        full_gt = np.stack(full_gt,0)
-        full_pred = np.stack(full_pred,0)
-        print(f'shape of full_gt:{full_gt.shape} and full_pred:{full_pred.shape}')
-        write.create_dataset('gt',data=full_gt,compression='gzip')
-        write.create_dataset('pred',data=full_pred,compression='gzip')
+        psnr_list.append(avg_psnr)
+        ssim_list.append(avg_ssim)
+        lpips_list.append(avg_lpips)
+
+        psnr_dict[_name] = avg_psnr
+        ssim_dict[_name] = avg_ssim
+        lpips_dict[_name] = avg_lpips
+
+    # with h5py.File('predict.h5','w') as write:
+    #     full_gt = np.stack(full_gt,0)
+    #     full_pred = np.stack(full_pred,0)
+    #     print(f'shape of full_gt:{full_gt.shape} and full_pred:{full_pred.shape}')
+    #     write.create_dataset('gt',data=full_gt,compression='gzip')
+    #     write.create_dataset('pred',data=full_pred,compression='gzip')
+    dash_line = '-' * 80 + '\n'
+    psnr_dict["psnr_mean"] = np.mean(psnr_list)
+    ssim_dict["ssim_mean"] = np.mean(ssim_list)
+    lpips_dict["lpips_mean"] = np.mean(lpips_list)
+    
+    psnr_str = ", ".join([key+": "+"{:.4f}".format(psnr_dict[key]) for key in psnr_dict.keys()])
+    ssim_str = ", ".join([key+": "+"{:.4f}".format(ssim_dict[key]) for key in ssim_dict.keys()])
+    lpips_str = ", ".join([key+": "+"{:.4f}".format(lpips_dict[key]) for key in lpips_dict.keys()])
+    logging.info("Mean PSNR: \n"+
+                dash_line + 
+                "{}.\n".format(psnr_str)+
+                dash_line)
+
+    logging.info("Mean SSIM: \n"+
+                dash_line + 
+                "{}.\n".format(ssim_str)+
+                dash_line) 
+    logging.info("Mean LPIPS: \n"+
+                dash_line + 
+                "{}.\n".format(lpips_str)+
+                dash_line)
 
 logging.info('Finished inference')

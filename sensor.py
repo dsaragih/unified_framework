@@ -91,28 +91,20 @@ class C2B(nn.Module):
             assert code.shape == (sub_frames, block_size, block_size)
             print('Initialized sensor with flutter shutter code from %s'%filename)
         
-        elif mask == '2x2':
-            assert block_size == 2
-            mask = scipy.io.loadmat('./data/2x2_mask.mat')['mask']
-            mask = np.transpose(mask, [2, 0, 1])
-            mask = mask.astype(np.float32)
+        elif mask == 'cc':
+            # Assert that {block_size}x{block_size}.mat exists in the data directory.
+            try:
+                code = scipy.io.loadmat(f'./data/{block_size}x{block_size}_mask.mat')['mask']
+            except FileNotFoundError:
+                raise FileNotFoundError(f'./data/{block_size}x{block_size}_mask.mat not found.')
+            
+            code = np.transpose(code, [2, 0, 1])
+            code = code.astype(np.float32)
             # Crop block size
-            mask = mask[:, :block_size, :block_size]
-            assert mask.shape == (sub_frames, block_size, block_size)
+            code = code[:, :block_size, :block_size]
+            assert code.shape == (sub_frames, block_size, block_size)
 
-            code = torch.cuda.FloatTensor(mask).unsqueeze(0)
-            # code = torch.tensor(mask).unsqueeze(0)
-
-        elif mask == '4x4':
-            assert block_size == 4
-            mask = scipy.io.loadmat('./data/4x4_mask.mat')['mask']
-            mask = np.transpose(mask, [2, 0, 1])
-            mask = mask.astype(np.float32)
-            # Crop block size
-            mask = mask[:, :block_size, :block_size]
-            assert mask.shape == (sub_frames, block_size, block_size)
-
-            code = torch.cuda.FloatTensor(mask).unsqueeze(0)
+            code = torch.cuda.FloatTensor(code).unsqueeze(0)
 
         else:
             ## random code 16x8x8
@@ -129,7 +121,9 @@ class C2B(nn.Module):
 
     def forward(self, x):
         _,_,H,W = x.size()
-        code_repeat = self.code.repeat(1, 1, H//self.block_size, W//self.block_size)
+        code_repeat = self.code.repeat(1, 1, H//self.block_size + 1, W//self.block_size + 1)
+        # Crop the code_repeat to the same size as x.
+        code_repeat = code_repeat[:, :, :H, :W]
         if self.code_repeat is None:
             self.code_repeat = code_repeat
         b1 = torch.sum(code_repeat*x, dim=1, keepdim=True) / torch.sum(code_repeat, dim=1, keepdim=True)

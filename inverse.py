@@ -60,11 +60,11 @@ class ShiftVarConv2D(nn.Module):
     def __init__(self, out_channels, block_size, window=3, two_bucket=False):
         super(ShiftVarConv2D, self).__init__()
 
-        self.block_size = block_size
         self.mid_channels = out_channels
+        self.block_size = block_size
         self.window = window
         self.two_bucket = two_bucket
-
+        # in_ch = 36, out_ch = 64 * 36
         self.inverse_layer = self.conv3d_layer(in_channels=block_size**2, out_channels=self.mid_channels*(block_size**2))
         self.ps_layer = nn.PixelShuffle(upscale_factor=block_size)
         # self.conv_layer = self.conv2d_layer(in_channels=self.mid_channels, out_channels=out_channels)

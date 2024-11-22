@@ -14,13 +14,14 @@ import argparse
 import time
 from torch.utils import data
 from torch.utils.tensorboard import SummaryWriter
-
+from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+from skimage.metrics import structural_similarity as compare_ssim
 ## set random seed
 torch.manual_seed(12)
 np.random.seed(12)
 
 
-from dataloader import Dataset_load, DavisData, SixGraySimData
+from dataloader import Dataset_load, DavisData, SixGraySimData, GraySimDavis
 from sensor import C2B
 from unet import UNet
 from inverse import ShiftVarConv2D, StandardConv2D
@@ -31,7 +32,7 @@ import utils
 parser = argparse.ArgumentParser()
 parser.add_argument('--expt', type=str, required=True, help='expt name')
 parser.add_argument('--save_root',type=str,required=False,default='models', help='root path to save trained models')
-parser.add_argument('--epochs', type=int, default=120, help='num epochs to train')
+parser.add_argument('--epochs', type=int, default=200, help='num epochs to train')
 parser.add_argument('--batch', type=int, required=True, help='batch size for training and validation')
 parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
 parser.add_argument('--blocksize', type=int, default=2, help='tile size for code default 3x3')
@@ -81,8 +82,10 @@ logger = logging.getLogger()
 
 ## Dataloaders
 data_path = "/scratch/ondemand28/dsaragih/datasets/DAVIS/JPEGImages/480p"
-test_data_path = '/u8/d/dsaragih/diffusion-posterior-sampling/STFormer/test_datasets/simulation'
-resize_h, resize_w = 128, 128
+test_data_path = '/scratch/ondemand28/dsaragih/datasets/TestDAVIS/TestImages'
+# resize_h, resize_w = 128, 128
+# Must be multiple of args.blocksize
+resize_h, resize_w = 128 , 128 
 train_pipeline = [ 
     dict(type='RandomResize'),
     dict(type='RandomCrop',crop_h=resize_h,crop_w=resize_w,random_size=True),
@@ -118,7 +121,7 @@ sample = next(iter(training_generator)).cuda()
 c2b(sample)
 code_repeat = c2b.code_repeat
 
-validation_set = SixGraySimData(test_data_path, mask=code_repeat[0].cpu().numpy())
+validation_set = GraySimDavis(test_data_path, mask=code_repeat[0].cpu().numpy())
 validation_generator = data.DataLoader(validation_set, **val_params)
 logging.info('Loaded validation set: %d videos'%(len(validation_generator)))
 
@@ -179,6 +182,10 @@ for i in range(start_epoch, start_epoch+num_epochs):
             b1, b0 = c2b(gt_vid)
             b_stack = torch.cat([b1,b0], dim=1)
             interm_vid = invNet(b_stack)
+            # Pad to 128x128 if necessary
+            if interm_vid.shape[-1] != 128:
+                interm_vid = F.pad(interm_vid, (0, 128-interm_vid.shape[-1], 0, 128-interm_vid.shape[-2]))
+
         highres_vid = uNet(interm_vid) # (N,16,H,W)
         
         psnr_sum += utils.compute_psnr(highres_vid, gt_vid).item()
@@ -207,7 +214,6 @@ for i in range(start_epoch, start_epoch+num_epochs):
 
         if train_iter % 1000 == 0:
             logging.info('epoch: %3d \t iter: %5d \t loss: %.4f'%(i, train_iter, loss.item()))
-
         train_iter += 1
 
     logging.info('Total train iterations: %d'%(train_iter))
@@ -241,6 +247,9 @@ for i in range(start_epoch, start_epoch+num_epochs):
                 gt_vid = gt_vid[0].float().cuda()
                 if torch.sum(gt_vid) == 0:
                     continue
+
+                if val_iter > 3:
+                    break
                 if not args.two_bucket:
                     b1 = c2b(gt_vid) # (N,1,H,W)
                     # b1 = torch.mean(gt_vid, dim=1, keepdim=True)
@@ -248,11 +257,23 @@ for i in range(start_epoch, start_epoch+num_epochs):
                 else:
                     b1, b0 = c2b(gt_vid)
                     b_stack = torch.cat([b1,b0], dim=1)
-                    interm_vid = invNet(b_stack)            
+                    interm_vid = invNet(b_stack)  
+                    # Pad to 128x128 if necessary
+                    if interm_vid.shape[-1] != 128:
+                        interm_vid = F.pad(interm_vid, (0, 128-interm_vid.shape[-1], 0, 128-interm_vid.shape[-2]))          
                 highres_vid = uNet(interm_vid) # (N,9,H,W)
 
-                val_psnr_sum += utils.compute_psnr(highres_vid, gt_vid).item()
-                val_ssim_sum += utils.compute_ssim(highres_vid, gt_vid).item()
+                vid_np = gt_vid.squeeze().data.cpu().numpy() 
+                highres_np = highres_vid.squeeze().data.cpu().numpy() 
+
+                # val_psnr_sum += utils.compute_psnr(highres_vid, gt_vid).item()
+                # val_ssim_sum += utils.compute_ssim(highres_vid, gt_vid).item()
+                val_psnr_sum += compare_psnr(highres_np, vid_np, data_range=1)
+
+                tmp_ssim = 0.
+                for j in range(gt_vid.shape[0]):
+                    tmp_ssim += compare_ssim(highres_np[j], vid_np[j], data_range=1)
+                val_ssim_sum += tmp_ssim / gt_vid.shape[0]
                 
                 psnr = utils.compute_psnr(highres_vid, gt_vid).item() / gt_vid.shape[0]
                 ssim = utils.compute_ssim(highres_vid, gt_vid).item() / gt_vid.shape[0]
@@ -289,7 +310,7 @@ for i in range(start_epoch, start_epoch+num_epochs):
         writer.add_scalar('validation/ssim',val_ssim_sum/len(validation_set),i)
     
     ## CHECKPOINT
-    if ((i+1) % 50 == 0) or ((i+1) == (start_epoch+num_epochs)):
+    if ((i+1) % 10 == 0) or ((i+1) == (start_epoch+num_epochs)):
         utils.save_checkpoint(state={'epoch': i, 
                                     'invnet_state_dict': invNet.state_dict(),
                                     'unet_state_dict': uNet.state_dict(),
