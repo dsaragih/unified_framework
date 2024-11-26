@@ -183,8 +183,8 @@ for i in range(start_epoch, start_epoch+num_epochs):
             b_stack = torch.cat([b1,b0], dim=1)
             interm_vid = invNet(b_stack)
             # Pad to 128x128 if necessary
-            if interm_vid.shape[-1] != 128:
-                interm_vid = F.pad(interm_vid, (0, 128-interm_vid.shape[-1], 0, 128-interm_vid.shape[-2]))
+            if interm_vid.shape[-1] != resize_w:
+                interm_vid = F.pad(interm_vid, (0, resize_w-interm_vid.shape[-1], 0, resize_w-interm_vid.shape[-2]))
 
         highres_vid = uNet(interm_vid) # (N,16,H,W)
         
@@ -259,8 +259,8 @@ for i in range(start_epoch, start_epoch+num_epochs):
                     b_stack = torch.cat([b1,b0], dim=1)
                     interm_vid = invNet(b_stack)  
                     # Pad to 128x128 if necessary
-                    if interm_vid.shape[-1] != 128:
-                        interm_vid = F.pad(interm_vid, (0, 128-interm_vid.shape[-1], 0, 128-interm_vid.shape[-2]))          
+                    if interm_vid.shape[-1] != resize_w:
+                        interm_vid = F.pad(interm_vid, (0, resize_w-interm_vid.shape[-1], 0, resize_w-interm_vid.shape[-2]))          
                 highres_vid = uNet(interm_vid) # (N,9,H,W)
 
                 vid_np = gt_vid.squeeze().data.cpu().numpy() 

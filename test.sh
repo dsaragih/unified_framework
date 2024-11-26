@@ -10,9 +10,9 @@
 
 srun --partition=debugnodes --mem=8G --nodelist=tensor1 --gres=gpu:nvidia_titan_v \
     python test.py \
-    --ckpt "model_2x2_000198.pth" \
+    --ckpt "model_6x6_000219.pth" \
     --gpu 0 \
     --two_bucket \
-    --blocksize 2 \
-    --subframes 4 \
-    --mask_path "./data/2x2_mask.mat"
+    --blocksize 6 \
+    --subframes 36 \
+    --mask_path "./data/6x6_mask.mat"

@@ -23,7 +23,8 @@ srun python train.py \
         --expt davis \
         --batch 64 \
         --gpu 0 \
-        --blocksize 6 \
-        --subframes 36 \
+        --blocksize 8 \
+        --subframes 64 \
         --two_bucket \
         --mask cc \
+        --save_root "models_2"

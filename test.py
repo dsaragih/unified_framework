@@ -134,16 +134,24 @@ with torch.no_grad():
         for seq in range(batch_size):
             vid = torch.cuda.FloatTensor(gt[seq:seq+1,...]) # (1, s, H,W)
             # Number of frames might be less than code_repeat
+            # If vid not [image_height, image_width], pad to [image_height, image_width]
+            pad = (0, input_params['height'] - vid.shape[-2], 0, input_params['width'] - vid.shape[-1])
+            vid = F.pad(vid, pad, 'constant', 0)
             b1 = meas[seq:seq+1,...] # (1, 1, H,W)
+            b1 = F.pad(b1, pad, 'constant', 0)
             if not args.two_bucket:
                 interm_vid = invNet(b1) 
             else:
                 b0 = torch.mean(vid, dim=1, keepdim=True)
                 b_stack = torch.cat([b1,b0], dim=1)
                 interm_vid = invNet(b_stack)
+                if interm_vid.shape[-1] != vid.shape[-1]:
+                    interm_vid = F.pad(interm_vid, (0, vid.shape[-1]-interm_vid.shape[-1], 0, vid.shape[-2]-interm_vid.shape[-2]))
+
+            logging.info(f"b1 shape: {b1.shape}, interm_vid shape: {interm_vid.shape}, vid shape: {vid.shape}")
             highres_vid = uNet(interm_vid) # (1,16,H,W)
             
-            assert highres_vid.shape == vid.shape
+            assert highres_vid.shape == vid.shape, f"Highres vid shape: {highres_vid.shape}, vid shape: {vid.shape}"
             highres_vid = torch.clamp(highres_vid, min=0, max=1)
             
             ## converting tensors to numpy arrays
