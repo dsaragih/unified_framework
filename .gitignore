@@ -7,8 +7,10 @@ __pycache__/
 /results/
 /models/
 /models_2/
+/results_2/
 predict.h5
 *.out
+
 # C extensions
 *.so
 

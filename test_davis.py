@@ -123,7 +123,7 @@ with torch.no_grad():
         if torch.sum(gt) == 0:
             continue
 
-        if data_iter > 3:
+        if data_iter > 300:
             save_images = False
 
         gt = gt[0].numpy() # (f/s, s, H,W)
@@ -157,7 +157,7 @@ with torch.no_grad():
                 if interm_vid.shape[-1] != vid.shape[-1]:
                     interm_vid = F.pad(interm_vid, (0, vid.shape[-1]-interm_vid.shape[-1], 0, vid.shape[-2]-interm_vid.shape[-2]))
 
-            logging.info(f"b1 shape: {b1.shape}, interm_vid shape: {interm_vid.shape}, vid shape: {vid.shape}")
+            # logging.info(f"b1 shape: {b1.shape}, interm_vid shape: {interm_vid.shape}, vid shape: {vid.shape}")
             highres_vid = uNet(interm_vid) # (1,16,H,W)
             
             assert highres_vid.shape == vid.shape, f"Highres vid shape: {highres_vid.shape}, vid shape: {vid.shape}"
@@ -177,8 +177,11 @@ with torch.no_grad():
                 logging.info('Min: b1_np: %s, vid_np: %s, highres_np: %s'%(b1_np.min(), vid_np.min(), highres_np.min()))
                 logging.info('Max: b1_np: %s, vid_np: %s, highres_np: %s'%(b1_np.max(), vid_np.max(), highres_np.max()))
 
+            # Check they are the same size
+            assert vid_np.shape == highres_np.shape, f"Shapes do not match: {vid_np.shape} vs {highres_np.shape}"
+
             first_gt = torch.tensor(vid_np).cuda()
-            output_tensor = torch.tensor(highres_np[0]).cuda()
+            output_tensor = torch.tensor(highres_np).cuda()
 
             # Add channel dim if missing (t x h x w -> t x 3 x h x w)
             # use cv2 to convert to 3 channel image

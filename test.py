@@ -10,8 +10,7 @@ import torch.nn.functional as F
 import logging
 import glob
 import argparse
-from skimage.metrics import peak_signal_noise_ratio as compare_psnr
-from skimage.metrics import structural_similarity as compare_ssim
+from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure, LearnedPerceptualImagePatchSimilarity
 import h5py
 from unet import UNet
 import utils
@@ -107,9 +106,12 @@ full_gt = []
 full_pred = []
 psnr_list, ssim_list, lpips_list = [], [], []
 psnr_dict, ssim_dict, lpips_dict = {}, {}, {}
+psnr = PeakSignalNoiseRatio(data_range=1.0).cuda()
+ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
+lpips_fn = LearnedPerceptualImagePatchSimilarity(net_type='vgg', normalize=True).cuda()
+
 save_images = True
 with torch.no_grad():
-    lpips_fn = LPIPS(net='vgg').cuda()
     for data_iter,data in enumerate(data_loader):
         meas, gt = data
         # if gt all zeros, skip
@@ -131,6 +133,7 @@ with torch.no_grad():
         psnr_sum = 0.
         ssim_sum = 0.
         lpips_sum = 0.
+        # Only first.
         for seq in range(batch_size):
             vid = torch.cuda.FloatTensor(gt[seq:seq+1,...]) # (1, s, H,W)
             # Number of frames might be less than code_repeat
@@ -165,41 +168,51 @@ with torch.no_grad():
             if seq == 0 and data_iter == 0:
                 logging.info('Shapes: b1_np: %s, vid_np: %s, highres_np: %s'%(b1_np.shape, vid_np.shape, highres_np.shape))
 
-            ## psnr
-            psnr = compare_psnr(highres_np, vid_np)
-            psnr_sum += psnr
+            # Check they are the same size
+            assert vid_np.shape == highres_np.shape, f"Shapes do not match: {vid_np.shape} vs {highres_np.shape}"
 
-            ## ssim
-            ssim = 0.
-            lpips = 0.
-            for sf in range(vid_np.shape[0]):
-                ssim += compare_ssim(highres_np[sf], vid_np[sf], 
-                                gaussian_weights=True, sigma=1.5, use_sample_covariance=False, data_range=1.0)
-                lpips += utils.compare_lpips(highres_np[sf]*255, vid_np[sf]*255, lpips_fn)
-            ssim = ssim / vid_np.shape[0]
-            lpips = lpips / vid_np.shape[0]
-            ssim_sum += ssim
-            lpips_sum += lpips
+            first_gt = torch.tensor(vid_np).cuda()
+            output_tensor = torch.tensor(highres_np).cuda()
 
-            if seq%args.log_interval == 0:
-                logging.info('Seq %.2d PSNR: %.2f SSIM: %.3f LPIPS: %.3f'%(seq+1, psnr, ssim, lpips))
+            # Add channel dim if missing (t x h x w -> t x 3 x h x w)
+            # use cv2 to convert to 3 channel image
+            if output_tensor.ndim == 3:
+                output_tensor = torch.stack([output_tensor]*3, dim=1)
+                first_gt = torch.stack([first_gt]*3, dim=1)
+
+            # Clamp to [0, 1]
+            output_tensor = torch.clamp(output_tensor, 0.0, 1.0).float()
+            first_gt = torch.clamp(first_gt, 0.0, 1.0).float()
+            
+            # Check shapes
+            assert first_gt.shape == output_tensor.shape, f"Shapes do not match: {first_gt.shape} vs {output_tensor.shape}"
+
+            # Metrics
+            psnr.update(output_tensor, first_gt)
+            ssim.update(output_tensor, first_gt)
+            lpips_fn.update(output_tensor, first_gt)
 
             ## saving images and gifs
-            if save_images:
-                os.makedirs(os.path.join(save_path, _name), exist_ok=True)
-                os.makedirs(os.path.join(save_path, _name, 'frames'), exist_ok=True)
-                utils.save_image(b1_np, os.path.join(save_path, _name, 'seq_%.2d_coded.png'%(seq+1)))
-                if args.two_bucket:
-                    utils.save_image(b0_np, os.path.join(save_path, _name, 'seq_%.2d_complement.png'%(seq+1)))
-                if args.save_gif:
-                    utils.save_gif(vid_np, os.path.join(save_path, _name, 'seq_%.2d_gt.gif'%(seq+1)))
-                    utils.save_gif(highres_np, os.path.join(save_path, _name, 'seq_%.2d_recon.gif'%(seq+1)))
-                for sub_frame in range(vid_np.shape[0]):
-                    utils.save_image(highres_np[sub_frame], os.path.join(save_path, _name, 'frames', 'seq_%.2d_recon_%.2d.png'%(seq+1, sub_frame+1)))
+            # if save_images:
+            #     os.makedirs(os.path.join(save_path, _name), exist_ok=True)
+            #     os.makedirs(os.path.join(save_path, _name, 'frames'), exist_ok=True)
+            #     utils.save_image(b1_np, os.path.join(save_path, _name, 'seq_%.2d_coded.png'%(seq+1)))
+            #     if args.two_bucket:
+            #         utils.save_image(b0_np, os.path.join(save_path, _name, 'seq_%.2d_complement.png'%(seq+1)))
+            #     if args.save_gif:
+            #         utils.save_gif(vid_np, os.path.join(save_path, _name, 'seq_%.2d_gt.gif'%(seq+1)))
+            #         utils.save_gif(highres_np, os.path.join(save_path, _name, 'seq_%.2d_recon.gif'%(seq+1)))
+            #     for sub_frame in range(vid_np.shape[0]):
+            #         utils.save_image(highres_np[sub_frame], os.path.join(save_path, _name, 'frames', 'seq_%.2d_recon_%.2d.png'%(seq+1, sub_frame+1)))
 
-        avg_psnr = psnr_sum / batch_size
-        avg_ssim = ssim_sum / batch_size
-        avg_lpips = lpips_sum / batch_size
+        avg_psnr = psnr.compute().item()
+        avg_ssim = ssim.compute().item()
+        avg_lpips = lpips_fn.compute().item()
+
+        psnr.reset()
+        ssim.reset()
+        lpips_fn.reset()
+
         logging.info('Sequence %s done'%(_name))
         logging.info('Average PSNR: %.2f'%(avg_psnr))
         logging.info('Average SSIM: %.3f'%(avg_ssim))
