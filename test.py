@@ -23,7 +23,7 @@ from lpips import LPIPS
 # Dirs: /scratch/ondemand28/dsaragih/datasets/TestDAVIS/TestImages, /u8/d/dsaragih/diffusion-posterior-sampling/STFormer/test_datasets/simulation
 parser = argparse.ArgumentParser()
 parser.add_argument('--savedir', type=str, default='results' ,help='export dir name to dump results')
-parser.add_argument('--data_path', type=str, default='/scratch/ondemand28/dsaragih/datasets/TestDAVIS/TestImages', help='path to test data')
+parser.add_argument('--data_path', type=str, default='/u8/d/dsaragih/diffusion-posterior-sampling/STFormer/test_datasets/simulation', help='path to test data')
 parser.add_argument('--ckpt', type=str, required=True, help='checkpoint full name')
 parser.add_argument('--blocksize', type=int, default=2, help='tile size for code default 3x3')
 parser.add_argument('--subframes', type=int, default=4, help='num sub frames')
@@ -97,7 +97,7 @@ print(f"Code repeat shape: {code_repeat.shape}")
 # for i in range(code_repeat.shape[1]):
 #     utils.save_image(code_repeat[0, i].cpu().numpy(), os.path.join(save_path, f'code_{i}.png'))
 
-test_data = GraySimDavis(args.data_path,mask=code_repeat.squeeze(0).cpu().numpy())
+test_data = SixGraySimData(args.data_path,mask=code_repeat.squeeze(0).cpu().numpy())
 data_loader = torch.utils.data.DataLoader(test_data, batch_size=1, shuffle=False)
 
 logging.info('Starting inference')

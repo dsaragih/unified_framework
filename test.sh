@@ -7,7 +7,6 @@
 #     --save_gif \
 #     --two_bucket
 
-
 srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     python test.py \
     --ckpt "model_2x2_000198.pth" \
@@ -16,7 +15,7 @@ srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     --blocksize 2 \
     --subframes 4 \
     --mask_path "./data/2x2_mask.mat" \
-    --savedir "results"
+    --savedir "results_3"
 
 srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     python test.py \
@@ -26,7 +25,7 @@ srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     --blocksize 4 \
     --subframes 16 \
     --mask_path "./data/4x4_mask.mat" \
-    --savedir "results"
+    --savedir "results_3"
 
 srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     python test.py \
@@ -36,7 +35,7 @@ srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     --blocksize 6 \
     --subframes 36 \
     --mask_path "./data/6x6_mask.mat" \
-    --savedir "results"
+    --savedir "results_3"
 
 srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     python test.py \
@@ -46,4 +45,4 @@ srun --partition=gpunodes --mem=16G --nodelist=calypso --gres=gpu:1 \
     --blocksize 8 \
     --subframes 64 \
     --mask_path "./data/8x8_mask.mat" \
-    --savedir "results"
+    --savedir "results_3"
